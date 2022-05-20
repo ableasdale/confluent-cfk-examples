@@ -106,9 +106,10 @@ Topic: example-topic	PartitionCount: 4	ReplicationFactor: 1	Configs: min.insync.
 
 ## Adding mTLS
 
-Create the secret from `secret.txt` in the directory:
+Create the secret from `secret.txt` in the `single-broker-with-tls-and-zookeeper` directory:
 
 ```bash
+cd single-broker-with-tls-and-zookeeper
 kubectl create secret generic credential \
   --from-file=my_credentials=secret.txt
 ```
