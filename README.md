@@ -2,7 +2,17 @@
 
 ## Simple Broker and Zookeeper
 
-Start the `confluent-operator` pod (see the quick start guide for more information)
+Start the `confluent-operator` pod (see the quick start guide for more information):
+
+```bash
+kubectl create namespace confluent
+kubectl config set-context --current --namespace confluent
+helm repo add confluentinc https://packages.confluent.io/helm
+helm repo update
+helm upgrade --install confluent-operator confluentinc/confluent-for-kubernetes
+```
+
+Start Zookeeper and the broker:
 
 ```bash
 cd simple-broker-and-zookeeper
@@ -77,7 +87,7 @@ kubectl logs --follow zookeeper-0
 kubectl apply -f example-topic.yaml
 ```
 
-## Confirm that the topic was created
+## Confirm on the broker that the topic was created
 
 ```bash
 kubectl --namespace=confluent exec -it kafka-0 -- bash
@@ -92,4 +102,84 @@ Topic: example-topic	PartitionCount: 4	ReplicationFactor: 1	Configs: min.insync.
 	Topic: example-topic	Partition: 1	Leader: 0	Replicas: 0	Isr: 0	Offline:
 	Topic: example-topic	Partition: 2	Leader: 0	Replicas: 0	Isr: 0	Offline:
 	Topic: example-topic	Partition: 3	Leader: 0	Replicas: 0	Isr: 0	Offline:
+```
+
+## Adding mTLS
+
+Create the secret from `secret.txt` in the directory:
+
+```bash
+kubectl create secret generic credential \
+  --from-file=my_credentials=secret.txt
+```
+
+Create the CA
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=foo.bar.com"
+```
+
+then:
+
+```bash
+kubectl create secret tls ca-pair-sslcerts --key="tls.key" --cert="tls.crt"
+```
+
+Or:
+
+```bash
+cat tls.crt | base64
+cat tls.key | base64
+```
+
+And add the output into `tls.yaml` and apply to create the secret
+
+Spin up the broker (and Zookeeper if needed):
+
+```bash
+kubectl apply -f ../simple-broker-and-zookeeper/zookeeper.yaml
+kubectl apply -f broker.yaml
+```
+
+## Older pieces
+
+```bash
+kubectl create secret tls ca-pair-sslcerts \
+  --cert=/path/to/ca.pem \
+  --key=/path/to/ca-key.pem
+```
+
+```bash
+kubectl get secret confluent-operator-licensing -o jsonpath='{.data}'
+```
+### Debugging
+
+```bash
+kubectl --namespace=confluent exec -it kafka-0 -- bash
+more /opt/confluentinc/etc/kafka/kafka.properties
+```
+
+### Something failed? Check the Operator!
+
+```bash
+kubectl logs confluent-operator-64c5c5756d-vwb9s
+```
+
+### List recent events in time order 
+
+```bash
+kubectl get events --sort-by=.metadata.creationTimestamp
+```
+
+### Nuke Minikube
+
+```bash
+minikube delete && minikube start --vm-driver kvm2
+```
+
+### get rolebindings
+
+```bash
+kubectl get confluentrolebindings
+kubectl api-resources | grep bindings
 ```
