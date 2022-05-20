@@ -76,3 +76,20 @@ kubectl logs --follow zookeeper-0
 ```bash
 kubectl apply -f example-topic.yaml
 ```
+
+## Confirm that the topic was created
+
+```bash
+kubectl --namespace=confluent exec -it kafka-0 -- bash
+kafka-topics --bootstrap-server localhost:9092 --describe --topic example-topic
+```
+
+You should see:
+
+```bash
+Topic: example-topic	PartitionCount: 4	ReplicationFactor: 1	Configs: min.insync.replicas=1,segment.bytes=1073741824,retention.ms=86400000,message.format.version=2.6-IV0
+	Topic: example-topic	Partition: 0	Leader: 0	Replicas: 0	Isr: 0	Offline:
+	Topic: example-topic	Partition: 1	Leader: 0	Replicas: 0	Isr: 0	Offline:
+	Topic: example-topic	Partition: 2	Leader: 0	Replicas: 0	Isr: 0	Offline:
+	Topic: example-topic	Partition: 3	Leader: 0	Replicas: 0	Isr: 0	Offline:
+```
