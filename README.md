@@ -2,7 +2,7 @@
 
 ## Simple Broker and Zookeeper
 
-Start the confluent-operator pod (see the quick start guide for more information)
+Start the `confluent-operator` pod (see the quick start guide for more information)
 
 ```bash
 cd simple-broker-and-zookeeper
