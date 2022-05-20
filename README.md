@@ -70,3 +70,9 @@ kafka-console-consumer --bootstrap-server localhost:9092 --topic test
 kubectl logs --follow kafka-0
 kubectl logs --follow zookeeper-0
 ```
+
+## Create the example topic
+
+```bash
+kubectl apply -f example-topic.yaml
+```
