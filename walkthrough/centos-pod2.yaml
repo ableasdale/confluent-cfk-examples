@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: centos8-pod
+spec:
+  containers:
+  - name: centos8-container
+    image: centos:8
+    command: ["sleep", "3600"]
+    resources:
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+

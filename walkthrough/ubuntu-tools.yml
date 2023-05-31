@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: alexjbleasdale/ubuntu-tools:0.0.1
+      env:
+        - name: CONFLUENT_HOME
+          value: /usr
+        - name: JAVA_HOME
+          value: /usr/lib/jvm/java-17-openjdk-amd64/
+        - name: TERM
+          value: xterm-256color
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "200m"
+      volumeMounts:
+        - name: my-volume
+          mountPath: /var/my-data
+  volumes:
+    - name: my-volume
+      emptyDir: {}

@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+    - name: my-container
+      image: ubuntu:23.04
+      env:
+        - name: CONFLUENT_HOME
+          value: /usr
+        - name: JAVA_HOME
+          value: /usr/lib/jvm/java-17-openjdk-amd64/
+        - name: TERM
+          value: xterm-256color
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "200m"
+      volumeMounts:
+        - name: my-volume
+          mountPath: /var/my-data
+  initContainers:
+    - name: install-packages
+      image: ubuntu:23.04
+      command: ["bash", "-c"]
+      args:
+        - |
+          apt-get update \
+          && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              git \
+              dnsutils \
+              openssl \
+              curl \
+              wget \
+              jq \
+              netcat-openbsd \
+              httpie \
+              peco \
+              vim \
+              expect \
+              openjdk-17-jdk \
+              gradle \
+              kafkacat \
+          && rm -rf /var/lib/apt/lists/*
+  volumes:
+    - name: my-volume
+      emptyDir: {}
