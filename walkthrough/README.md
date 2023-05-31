@@ -280,6 +280,16 @@ kubectl port-forward controlcenter-0 9021:9021
 
 Check the setup by going to http://localhost:9021/clusters
 
+#### Re-deploy C3
+
+If you need to re-deploy C3 after any configuration changes:
+
+```bash
+kubectl delete pod controlcenter-0
+kubectl apply -f controlcenter.yaml
+```
+
+
 ### Let's look at Zookeeper
 
 Describe `zookeeper-0`:
@@ -613,13 +623,13 @@ We're going to use this as our base: https://github.com/ableasdale/confluent-doc
 We're going to build the `Dockerfile`:
 
 ```bash
-docker build . -t alexjbleasdale/ubuntu-tools:0.0.1
+docker build . -t alexjbleasdale/ubuntu-tools:0.0.2
 ```
 
 And then push it:
 
 ```bash
-docker push alexjbleasdale/ubuntu-tools:0.0.1
+docker push alexjbleasdale/ubuntu-tools:0.0.2
 ```
 
 Then we create our resource for it:
@@ -632,7 +642,7 @@ metadata:
 spec:
   containers:
     - name: my-container
-      image: your-custom-image:tag
+      image: alexjbleasdale/ubuntu-tools:0.0.2
       env:
         - name: CONFLUENT_HOME
           value: /usr
@@ -681,6 +691,55 @@ confluent
 
 ... and so on ...
 
+To redeploy, simply run:
+
+```bash
+kubectl delete pod ubuntu-pod
+kubectl apply -f ubuntu-tools.yml
+```
+
+### Using the Kafka tools on the Ubuntu Pod
+
+```bash
+/opt/kafka/bin/kafka-console-producer.sh
+```
+
+TODO: 
+
+/opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-0.confluent.svc.cluster.local:9092 --topic ab-test-topic 
+doesn't work
+
+kubectl exec ubuntu-pod -- /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-0:9092 --topic ab-test-topic
+
+To resolve the host by "hostname":
+
+```bash
+ping kafka-0.confluent.svc.cluster.local
+```
+
+
+This seems to work if you specify the IP for the service for kafka-0
+
+```bash
+kubectl exec ubuntu-pod -- /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server 10.106.55.186:9092 --topic ab-test-topic
+```
+
+Also - note that you can get the FQDN from a host by running:
+
+```bash
+hostname --fqdn
+kafka-0.kafka.confluent.svc.cluster.local
+```
+
+So this works:
+
+```bash
+/opt/kafka/bin/kafka-console-producer.sh --bootstrap-server kafka-0.kafka.confluent.svc.cluster.local:9092 --topic ab-test-topic 
+```
+
+hostname --fqdn
+controlcenter-0.controlcenter.confluent.svc.cluster.local
+
 ### Convenience methods
 
 TODO - docs / support bundle
@@ -708,8 +767,288 @@ spec:
 status: {}
 ```
 
+### Teardown
 
-## notes
+If confguration changes cause major issues, minikube can be stopped and removed:
+
+```bash
+minikube stop
+minikube delete
+minikube start
+```
+
+This will allow you to start fresh with a new deployment.
+
+## Building the setup piece by piece...
+
+After restarting with a **clean** install of minikube (see the Teardown section).
+
+We need to run:
+
+```bash
+kubectl create namespace confluent
+kubectl config set-context --current --namespace confluent
+helm repo add confluentinc https://packages.confluent.io/helm
+helm repo update
+helm upgrade --install confluent-operator confluentinc/confluent-for-kubernetes
+```
+
+Following the above steps will set up the namespace and run the CfK Operator.  If you run `kubectl get pods` now, you will see:
+
+```
+NAME                                  READY   STATUS    RESTARTS   AGE
+confluent-operator-7cc4fdc656-sfvhs   1/1     Running   0          30s
+```
+
+We're going to deploy the components one-by-one...  Using the yaml files in this GIthub repository: https://github.com/ableasdale/confluent-cfk-examples/tree/main/walkthrough
+
+#### Zookeeper
+
+The basic resource definition (`zookeeper.yaml`) looks like this:
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: Zookeeper
+metadata:
+  name: zookeeper
+  namespace: confluent
+spec:
+  replicas: 3
+  image:
+    application: confluentinc/cp-zookeeper:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dataVolumeCapacity: 10Gi
+  logVolumeCapacity: 10Gi
+  
+```
+
+```bash
+kubectl apply -f zookeeper.yaml
+```
+
+You will see:
+
+```
+zookeeper.platform.confluent.io/zookeeper created
+```
+
+Running `kubectl get pods` should show the three zookeeper instances:
+
+```
+NAME                                  READY   STATUS    RESTARTS   AGE
+zookeeper-0                           0/1     Running   0          106s
+zookeeper-1                           1/1     Running   0          106s
+zookeeper-2                           1/1     Running   0          106s
+```
+
+Looking at the yaml file for zookeeper, we can see that the specification requires three replicas and that each instance has a data volume and a log volume.   
+
+We can confirm this by reviewing the Persistent Volumes (PV):
+
+```bash
+kubectl get pv --sort-by=.spec.capacity.storage
+```
+
+You will see something similar to this:
+
+```
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   REASON   AGE
+pvc-06c1c94b-dc0f-4b69-965a-2022f79926c2   10Gi       RWO            Delete           Bound    confluent/txnlog-zookeeper-2   standard                4m36s
+pvc-49e6e1e5-6673-43a4-b209-c73f934a0f0e   10Gi       RWO            Delete           Bound    confluent/txnlog-zookeeper-0   standard                4m36s
+pvc-583de40d-3795-481b-a04c-8a4294b67c4a   10Gi       RWO            Delete           Bound    confluent/data-zookeeper-1     standard                4m36s
+pvc-6828292c-48da-4fa2-a45d-d923c28b3bbc   10Gi       RWO            Delete           Bound    confluent/data-zookeeper-2     standard                4m36s
+pvc-6f997abf-1a09-4ff9-bca5-4f49db5e3347   10Gi       RWO            Delete           Bound    confluent/txnlog-zookeeper-1   standard                4m36s
+pvc-f05c7020-81de-4b13-98b7-68b813af9576   10Gi       RWO            Delete           Bound    confluent/data-zookeeper-0     standard                4m36s
+```
+
+Let's kill a Pod and see what happens:
+
+```bash
+kubectl delete pod zookeeper-0
+```
+
+`kubectl` confirms that the pod was deleted:
+
+```
+pod "zookeeper-0" deleted
+```
+
+Now let's run `kubectl get pods` and note that another Pod is immediately initialised to replace the deleted one (note the age difference): 
+
+```bash
+kubectl get pods
+NAME                                  READY   STATUS            RESTARTS   AGE
+confluent-operator-7cc4fdc656-sfvhs   1/1     Running           0          141m
+zookeeper-0                           0/1     PodInitializing   0          2s
+zookeeper-1                           1/1     Running           0          140m
+zookeeper-2                           1/1     Running           0          140m
+```
+
+What happens if we scale down from the yaml default `replicas: 3` configuration and configure the resource for 1 replica?
+
+```bash
+kubectl scale zookeeper zookeeper --replicas=1
+```
+
+Immediately if we do this and we look at the pods, we now see a single pod.
+
+Let's reinstate quorum by re-applying `zookeeper.yaml`:
+
+```bash
+kubectl apply -f zookeeper.yaml
+```
+
+Note that you now see three Zookeeper nodes.
+
+### Kafka Brokers
+
+Let's add the brokers (`brokers.yaml`):
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: Kafka
+metadata:
+  name: kafka
+  namespace: confluent
+spec:
+  replicas: 3
+  image:
+    application: confluentinc/cp-server:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dataVolumeCapacity: 100Gi
+  metricReporter:
+    enabled: true
+  dependencies:
+    zookeeper:
+      endpoint: zookeeper.confluent.svc.cluster.local:2181
+```
+
+We can introduce them by running: 
+
+```bash
+kubectl apply -f brokers.yaml
+```
+
+Let's confirm that we have 3 brokers:
+
+```
+kubectl get pods
+NAME                                  READY   STATUS            RESTARTS   AGE
+kafka-0                               0/1     Init:0/1          0          3s
+kafka-1                               0/1     Init:0/1          0          3s
+kafka-2                               0/1     PodInitializing   0          3s
+```
+
+Note from the `yaml` file that the spec contains a `dataVolumeCapacity` property (set to `100Gi`):
+
+```bash
+kubectl get pv --sort-by=.spec.capacity.storage
+```
+
+Now we see the volumes backing the 3 brokers listed:
+
+```
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   REASON   AGE
+pvc-041ec3c6-5868-4227-a91a-69fd8f31d1a3   100Gi      RWO            Delete           Bound    confluent/data0-kafka-0        standard                111s
+pvc-3c649bb7-f778-44b5-b3e4-525e553e3d44   100Gi      RWO            Delete           Bound    confluent/data0-kafka-1        standard                111s
+pvc-60a77fbf-5093-4cb1-b5f5-ece34288192a   100Gi      RWO            Delete           Bound    confluent/data0-kafka-2        standard                111s
+```
+
+Let's make sure the brokers are connected to zookeeper:
+
+```bash
+kubectl exec -it zookeeper-0 -- bash
+zookeeper-shell localhost:2181
+```
+
+We can run a few tests in Zookeeper to confirm that all brokers are registered as expected:
+
+```bash
+Connecting to localhost:2181
+Welcome to ZooKeeper!
+JLine support is disabled
+
+WATCHER::
+
+WatchedEvent state:SyncConnected type:None path:null
+get /kafka-confluent/controller
+{"version":2,"brokerid":0,"timestamp":"1685560188067","kraftControllerEpoch":-1}
+get /kafka-confluent/cluster/id
+{"version":"1","id":"TBOvRxhYTBumiqiGheNurA"}
+ls /kafka-confluent/brokers/ids
+[0, 1, 2]
+```
+
+### Schema Registry
+
+Let's review the `yaml` file (`schema-registry.yaml`):
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: SchemaRegistry
+metadata:
+  name: schemaregistry
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-schema-registry:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+    
+```
+
+Note that Schema Registry does not create any additional data volumes; all data is stored in topics managed by the brokers.
+
+Let's apply the `yaml`:
+
+```bash
+kubectl apply -f schema-registry.yaml
+```
+
+Running `kubectl get pods` will show us the newly instantiated Schema Registry instance:
+
+```
+NAME                                  READY   STATUS            RESTARTS   AGE
+schemaregistry-0                      0/1     PodInitializing   0          77s
+```
+
+Remember that we can use `kubectl describe services` to find out more about the network setup:
+
+```bash
+kubectl describe services schemaregistry-0
+```
+
+Note that the external port is 8081:
+
+```
+Port:              external  8081/TCP
+TargetPort:        8081/TCP
+Endpoints:         10.244.0.12:8081
+```
+
+We can set up port forwarding for that port:
+
+```bash
+kubectl port-forward schemaregistry-0 8081:8081
+```
+
+And run a `curl` call against the instance:
+
+```bash
+curl -s -XGET http://localhost:8081/schemas/types | jq
+```
+
+This will confirm that the ReST API is functioning - while there are no schemas yet, we can see a list of supported types to show that everything is working:
+
+```json
+[
+  "JSON",
+  "PROTOBUF",
+  "AVRO"
+]
+```
+
+## Notes
 
 confluent kafka topic consume -b confluent-audit-log-events
 confluent kafka broker describe --all --bootstrap kafka-0:9021
