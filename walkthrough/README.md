@@ -4,7 +4,11 @@ This is intended to be a walkthrough of the Confluent for Kubernetes quickstart.
 
 We will start by looking at the components that are installed by default and then look to start making modifications and additions with a view to demonstrating the workflow.
 
+#### Install `minikube`
+
 Start by installing minikube - follow the guide here: https://minikube.sigs.k8s.io/docs/start/
+
+#### Install `helm`
 
 Then install helm (https://helm.sh/) on OS X we're going to use brew for this:
 
@@ -12,15 +16,25 @@ Then install helm (https://helm.sh/) on OS X we're going to use brew for this:
 brew install helm
 ```
 
+#### Install `cubectx`
+
 Let's also install `cubectx`:
 
 ```bash
 brew install kubectx
 ```
 
+#### Install `krew`
+
+Install the `kubectl` plugin manager:
+
+```bash
+brew install krew
+```
+
 ### Configuring `minikube`
 
-Ensure minikube is successfully installed:
+Ensure `minikube` is successfully installed:
 
 ```bash
 minikube version
@@ -742,9 +756,19 @@ controlcenter-0.controlcenter.confluent.svc.cluster.local
 
 ### Convenience methods
 
-TODO - docs / support bundle
+
+### Support Bundle
+
+```bash
+kubectl confluent support-bundle --namespace <namespace>
+```
+
+See: https://docs.confluent.io/operator/current/co-troubleshooting.html#support-bundle
+
 
 ### Sidecar Pod
+
+TODO - old?
 
 ```yaml
 apiVersion: v1
@@ -1336,7 +1360,196 @@ We can use ReST Proxy to access the details:
 curl -s -XGET localhost:8082/topics/ab-example-topic | jq
 ```
 
+### Ubuntu Tools container
 
+Here's the definition for `ubuntu-tools.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: alexjbleasdale/ubuntu-tools:0.0.2
+      env:
+        - name: CONFLUENT_HOME
+          value: /usr
+        - name: JAVA_HOME
+          value: /usr/lib/jvm/java-17-openjdk-amd64/
+        - name: TERM
+          value: xterm-256color
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "200m"
+      volumeMounts:
+        - name: my-volume
+          mountPath: /var/my-data
+  volumes:
+    - name: my-volume
+      emptyDir: {}
+```
+
+Apply the `yaml` file:
+
+```bash
+kubectl apply -f ubuntu-tools.yaml
+```
+
+Connect to the tools instance (`ubuntu-pod`):
+
+```bash
+kubectl exec ubuntu-pod -it -- bash
+```
+
+
+### JMXTerm
+
+Connect to the `kafka-0` instance:
+
+```bash
+kubectl describe pod kafka-0 | grep ID
+```
+
+Note that the **Container ID** in this case is the second one listed (starting with b18d):
+
+```
+    Container ID:  docker://5c29397fb0821783e61713ec77a5178877c6abb27b1de180cd5e4007895d23a0
+    Image ID:      docker-pullable://confluentinc/confluent-init-container@sha256:546dc13c76cdf36968961b5ed930aa74af3c26a95ad1a72a8874fa937edd4ab6
+      CAAS_POD_ID:       kafka-0 (v1:metadata.name)
+    Container ID:  docker://b18df0804ebcf1b034a6ff044727da28c7af5793f6c5448389064692dd35e816
+    Image ID:      docker-pullable://confluentinc/cp-server@sha256:adf4cfdf99b1b526f7270aa951ad2891192a06d0ee6260e53ee66d441176fd4d
+      CAAS_POD_ID:    kafka-0 (v1:metadata.name)
+```
+
+We're going to attempt to `ssh` to the instance as root:
+
+```bash
+docker exec -it -u root b18df0804ebcf1b034a6ff044727da28c7af5793f6c5448389064692dd35e816 /bin/bash
+```
+
+Note that this doesn't seem to work anymore.  Let's use a `kubectl` extension called `exec-as` instead:
+
+```bash
+kubectl krew install exec-as
+```
+
+Now let's try to `ssh` (as root) into the instance:
+
+```bash
+kubectl exec-as -u root kafka-0 -- /bin/bash
+```
+
+Doesn't seem to work either...  Try:
+
+```bash
+minikube ssh docker container ls | grep kafka-0
+```
+
+This gives us a docker container ID:
+
+```bash
+b18df0804ebc   confluentinc/cp-server                      "/bin/sh -xc /mnt/co…"   3 hours ago         Up 3 hours                   k8s_kafka_kafka-0_confluent_e3d7e8aa-3909-4786-baa2-c75cae84545b_0
+919b597e381b   registry.k8s.io/pause:3.9                   "/pause"                 3 hours ago         Up 3 hours                   k8s_POD_kafka-0_confluent_e3d7e8aa-3909-4786-baa2-c75cae84545b_0
+```
+
+Let's try to connect to it:
+
+```bash
+minikube ssh "docker container exec -it -u 0 b18df0804ebc /bin/bash"
+```
+
+Let's install JMXTerm:
+
+```bash
+cd /tmp/
+wget https://github.com/jiaqi/jmxterm/releases/download/v1.0.4/jmxterm-1.0.4-uber.jar
+```
+
+And let's run JMXTerm:
+
+```bash
+java -jar jmxterm-1.0.4-uber.jar
+```
+
+Okay - can't connect to the JVMs!  Not sure why...?  Is Kafka running?!?
+
+```bash
+kubectl logs kafka-0
+```
+
+What about Jolokia then?
+
+```bash
+kubectl describe services kafka-0
+```
+
+```bash
+kubectl port-forward kafka-0 7777:7777
+```
+
+Let's try to access something in Jolokia:
+
+```
+curl -s -XGET http://localhost:7777/jolokia/version | jq
+```
+
+```json
+{
+  "request": {
+    "type": "version"
+  },
+  "value": {
+    "agent": "1.7.1",
+    "protocol": "7.2",
+    "config": {
+      "listenForHttpService": "true",
+      "maxCollectionSize": "0",
+      "authIgnoreCerts": "false",
+      "agentId": "10.244.0.17-1-9573584-jvm",
+      "agentType": "jvm",
+      "policyLocation": "classpath:/jolokia-access.xml",
+      "agentContext": "/jolokia",
+      "mimeType": "text/plain",
+      "discoveryEnabled": "true",
+      "streaming": "true",
+      "historyMaxEntries": "10",
+      "allowDnsReverseLookup": "true",
+      "maxObjects": "0",
+      "debug": "false",
+      "serializeException": "false",
+      "multicastGroup": "239.192.48.84",
+      "maxDepth": "15",
+      "authMode": "basic",
+      "authMatch": "any",
+      "canonicalNaming": "true",
+      "allowErrorDetails": "true",
+      "realm": "jolokia",
+      "includeStackTrace": "true",
+      "multicastPort": "24884",
+      "useRestrictorService": "false",
+      "debugMaxEntries": "100"
+    },
+    "info": {
+      "product": "jetty",
+      "vendor": "Eclipse",
+      "version": "9.4.51.v20230217"
+    }
+  },
+  "timestamp": 1685571199,
+  "status": 200
+}
+```
+
+```bash
+curl -s -XGET http://localhost:7777/jolokia/list | jq
+```
 
 ## Notes
 
@@ -1344,3 +1557,7 @@ confluent kafka topic consume -b confluent-audit-log-events
 confluent kafka broker describe --all --bootstrap kafka-0:9021
 
 confluent kafka topic produce test-topic --bootstrap kafka-0:9092
+
+kubectl describe pod kafka-0
+
+kubectl exec kafka-0 -it -- bash
