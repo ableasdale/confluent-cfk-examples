@@ -266,6 +266,12 @@ Describe the service:
 kubectl describe services controlcenter-0
 ```
 
+Look at the endpoints:
+
+```bash
+minikube service -n confluent controlcenter --url
+```
+
 In order to be able to access the container, we need to configure port forwarding on port 9021:
 
 ```bash
@@ -462,3 +468,250 @@ kafkatopic.platform.confluent.io/ab-example-topic created
 ```
 
 Read more on topic management here: https://docs.confluent.io/operator/current/co-manage-topics.html
+
+### `kubectl explain`
+
+We can use `kubectl explain` to get more information about a given resource specification:
+
+```bash
+kubectl explain kafkarestproxy.spec
+```
+
+```
+kubectl explain kafkarestproxy.spec.dependencies.kafka
+```
+
+Let's look at the `KafkaTopic` specification:
+
+```bash
+kubectl explain KafkaTopic.spec
+```
+
+You will see:
+
+```
+KIND:     KafkaTopic
+VERSION:  platform.confluent.io/v1beta1
+
+RESOURCE: spec <Object>
+
+DESCRIPTION:
+     spec defines the desired state of the KafkaTopic.
+```
+
+### Viewing Service information (as JSON)
+
+```bash
+kubectl get services -n confluent -ojson | jq
+```
+
+### List Persistent Volumes
+
+```bash
+kubectl get pv --sort-by=.spec.capacity.storage
+```
+
+### Show only running instances
+
+```bash
+kubectl get pods --field-selector=status.phase=Running
+```
+
+### Scaling Instances
+
+Kubernetes will allow you to easily scale your infrastructure using a command (and potentially, thresholds):
+
+```bash
+kubectl scale zookeeper zookeeper --replicas=2
+```
+
+You will see:
+
+```
+zookeeper.platform.confluent.io/zookeeper scaled
+```
+
+### Schema Registry
+
+Let's find out about Schema Registry
+
+```bash
+kubectl describe services schemaregistry-0
+```
+
+Note that the external port is 8081:
+
+```
+Port:              external  8081/TCP
+TargetPort:        8081/TCP
+Endpoints:         10.244.0.12:8081
+```
+
+```bash
+kubectl port-forward schemaregistry-0 8081:8081
+```
+
+http://localhost:8081/subjects
+
+Or:
+
+```bash
+curl --silent -X GET http://localhost:8081/subjects/ | jq
+```
+
+```bash
+curl --silent -X GET http://localhost:8081/config | jq
+```
+
+```bash
+curl -s -XGET http://localhost:8081/schemas/types | jq
+```
+
+
+### ReST Proxy
+
+```bash
+kubectl describe services kafkarestproxy-0
+```
+
+External port is 8082:
+
+```
+Port:              external  8082/TCP
+TargetPort:        8082/TCP
+Endpoints:         10.244.0.11:8082
+```
+
+```bash
+kubectl port-forward kafkarestproxy-0 8082:8082
+```
+
+```bash
+curl --silent -X GET "http://localhost:8082/topics" | jq
+```
+
+Let's view `ab-demo-topic` to see the current configuration:
+
+```bash
+curl --silent -X GET "http://localhost:8082/topics/ab-demo-topic" | jq
+```
+
+Let's view partition information:
+
+```bash
+curl --silent -X GET "http://localhost:8082/topics/ab-demo-topic/partitions" | jq
+```
+
+curl --silent -X GET http://localhost:8082/topics | jq
+
+### Ubuntu Tools Instance
+
+Useful to have an instance containing a set of tools that you can use to interrogate your pods.
+
+We're going to use this as our base: https://github.com/ableasdale/confluent-dockerfiles/blob/main/mTLS/tools/Dockerfile
+
+We're going to build the `Dockerfile`:
+
+```bash
+docker build . -t alexjbleasdale/ubuntu-tools:0.0.1
+```
+
+And then push it:
+
+```bash
+docker push alexjbleasdale/ubuntu-tools:0.0.1
+```
+
+Then we create our resource for it:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+    - name: my-container
+      image: your-custom-image:tag
+      env:
+        - name: CONFLUENT_HOME
+          value: /usr
+        - name: JAVA_HOME
+          value: /usr/lib/jvm/java-17-openjdk-amd64/
+        - name: TERM
+          value: xterm-256color
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "128Mi"
+          cpu: "200m"
+      volumeMounts:
+        - name: my-volume
+          mountPath: /var/my-data
+  volumes:
+    - name: my-volume
+      emptyDir: {}
+
+```
+
+Then instantiate it:
+
+```bash
+kubectl apply -f ubuntu-tools.yml
+```
+
+Now let's ssh into it:
+
+```bash
+kubectl exec ubuntu-pod -it -- bash
+```
+
+So we can now run:
+
+```bash
+java
+kcat
+httpie
+jq
+confluent
+```
+
+... and so on ...
+
+### Convenience methods
+
+TODO - docs / support bundle
+
+### Sidecar Pod
+
+```yaml
+apiVersion: v1
+
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    run: centos
+  name: centos
+  namespace: confluent
+spec:
+  containers:
+  - image: centos:8
+    name: centos
+    command: ["/bin/sleep", "3650d"]
+    resources: {}
+  dnsPolicy: ClusterFirst
+  restartPolicy: Never
+status: {}
+```
+
+
+## notes
+
+confluent kafka topic consume -b confluent-audit-log-events
+confluent kafka broker describe --all --bootstrap kafka-0:9021
+
+confluent kafka topic produce test-topic --bootstrap kafka-0:9092
