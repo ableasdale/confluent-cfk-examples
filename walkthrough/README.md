@@ -718,7 +718,7 @@ ping kafka-0.confluent.svc.cluster.local
 ```
 
 
-This seems to work if you specify the IP for the service for kafka-0
+This seems to work if you specify the IP for the service for `kafka-0`
 
 ```bash
 kubectl exec ubuntu-pod -- /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server 10.106.55.186:9092 --topic ab-test-topic
@@ -1047,6 +1047,296 @@ This will confirm that the ReST API is functioning - while there are no schemas 
   "AVRO"
 ]
 ```
+
+
+### ksqlDB
+
+Here's some minimal `yaml` configuration for ksqlDB (`ksqldb.yaml`):
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: KsqlDB
+metadata:
+  name: ksqldb
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-ksqldb-server:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dataVolumeCapacity: 10Gi
+  
+```
+
+Let's apply the configuration:
+
+```bash
+kubectl apply -f ksqldb.yaml
+```
+
+We see a new entry when we get our list of pods:
+
+```bash
+kubectl get pods
+NAME                                  READY   STATUS            RESTARTS   AGE
+ksqldb-0                              0/1     PodInitializing   0          29s
+```
+
+Note from the `yaml` file that the spec contains a `dataVolumeCapacity` property (set to `10Gi`):
+
+```bash
+kubectl get pv --sort-by=.spec.capacity.storage
+```
+
+Now we see the volume bound to the ksqlDB instance:
+
+```
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   REASON   AGE
+pvc-fb9716a9-a9b4-41fd-895c-b57316958e37   10Gi       RWO            Delete           Bound    confluent/data-ksqldb-0        standard                4m41s
+```
+
+Let's describe the service:
+
+```bash
+kubectl describe services ksqldb-0
+```
+
+We can set up port forwarding for that port:
+
+```bash
+kubectl port-forward ksqldb-0 8088:8088
+```
+
+Let's access the web UI (using cURL):
+
+```bash
+curl -s -XGET http://localhost:8088/info | jq
+```
+
+```json
+{
+  "KsqlServerInfo": {
+    "version": "7.4.0",
+    "kafkaClusterId": "TBOvRxhYTBumiqiGheNurA",
+    "ksqlServiceId": "confluent.ksqldb_",
+    "serverStatus": "RUNNING"
+  }
+}
+```
+
+### Kafka Connect
+
+Introducing a Connect node into the group of pods (`connect.yaml`):
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: Connect
+metadata:
+  name: connect
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-server-connect:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dependencies:
+    kafka:
+      bootstrapEndpoint: kafka:9071
+      
+```
+
+Applying the configuration:
+
+```bash
+kubectl apply -f connect.yaml
+```
+
+Let's see what port we can use:
+
+```bash
+kubectl describe services connect-0
+```
+
+We can see port 8083 is the ReST API port:
+
+```
+Port:              external  8083/TCP
+TargetPort:        8083/TCP
+```
+
+Set up port forwarding:
+
+```bash
+kubectl port-forward connect-0 8083:8083
+```
+
+Get the initial cluster info:
+
+```bash
+curl -s -XGET http://localhost:8083 | jq
+```
+
+```json
+{
+  "version": "7.4.0-ce",
+  "commit": "aee97a585bd06866",
+  "kafka_cluster_id": "TBOvRxhYTBumiqiGheNurA"
+}
+```
+
+Let's get a list of connector plugins:
+
+```bash
+curl -s -XGET http://localhost:8083/connector-plugins | jq
+```
+
+Note that there are only 3 source connectors installed; others would need to be added by extending this image:
+
+```json
+[
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorCheckpointConnector",
+    "type": "source",
+    "version": "7.4.0-ce"
+  },
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorHeartbeatConnector",
+    "type": "source",
+    "version": "7.4.0-ce"
+  },
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorSourceConnector",
+    "type": "source",
+    "version": "7.4.0-ce"
+  }
+]
+```
+
+### Confluent Control Center (C3)
+
+Here's the resource description (`controlcenter.yaml`):
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: ControlCenter
+metadata:
+  name: controlcenter
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-enterprise-control-center:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dataVolumeCapacity: 10Gi
+  dependencies:
+    schemaRegistry:
+      url: http://schemaregistry.confluent.svc.cluster.local:8081
+    ksqldb:
+    - name: ksqldb
+      url: http://ksqldb.confluent.svc.cluster.local:8088
+    connect:
+    - name: connect
+      url: http://connect.confluent.svc.cluster.local:8083
+
+```
+
+Add the Control Center into the pods:
+
+```bash
+kubectl apply -f controlcenter.yaml
+```
+
+Let's configure port forwarding on port 9021:
+
+```bash
+kubectl port-forward controlcenter-0 9021:9021
+```
+
+### ReST Proxy
+
+Here's the contents of `restproxy.yaml`:
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaRestProxy
+metadata:
+  name: kafkarestproxy
+  namespace: confluent
+spec:
+  replicas: 1
+  image:
+    application: confluentinc/cp-kafka-rest:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
+  dependencies:
+    schemaRegistry:
+      url: http://schemaregistry.confluent.svc.cluster.local:8081
+      
+```
+
+We're going to apply the resource:
+
+```bash
+kubectl apply -f restproxy.yaml
+```
+
+Let's confirm the port for ReST Proxy is 8082:
+
+```bash
+kubectl describe services kafkarestproxy-0
+```
+
+Set up port forwarding for testing:
+
+```bash
+kubectl port-forward kafkarestproxy-0 8082:8082
+```
+
+We can use cURL to inspect the cluster information:
+
+```
+curl -s -XGET localhost:8082/v3/clusters | jq
+```
+
+Let's get a list of topics:
+
+```bash
+curl -s -XGET localhost:8082/topics | jq
+```
+
+### Create a topic
+
+We're going to use the `topic.yaml` to create the topic:
+
+```yaml
+apiVersion: platform.confluent.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: ab-example-topic
+  namespace: confluent
+spec:
+  replicas: 1
+  partitionCount: 3
+  kafkaClusterRef:
+    name: kafka
+  configs:
+    min.insync.replicas: "1"
+    retention.ms: "86400000"
+
+```
+
+This can be applied to create the topic:
+
+```bash
+kubectl apply -f topic.yaml
+```
+
+We can use ReST Proxy to access the details:
+
+```bash
+curl -s -XGET localhost:8082/topics/ab-example-topic | jq
+```
+
+
 
 ## Notes
 
