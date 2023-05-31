@@ -6,18 +6,15 @@ metadata:
 spec:
   replicas: 1
   image:
-    application: confluentinc/cp-enterprise-control-center:7.0.1
-    init: confluentinc/confluent-init-container:2.2.0-1
+    application: confluentinc/cp-enterprise-control-center:7.4.0
+    init: confluentinc/confluent-init-container:2.6.0
   dataVolumeCapacity: 10Gi
-  configOverrides:
-    server:
-      - confluent.controlcenter.command.topic.replication=1
-      - confluent.controlcenter.replication.factor=1
-      - confluent.metrics.reporter.topic.replicas=1
-      - confluent.metrics.topic.replication=1
-      - confluent.monitoring.interceptor.topic.replication=1
-      - confluent.controlcenter.internal.topics.replication=1
-  externalAccess:
-    type: loadBalancer
-    loadBalancer:
-      domain: minikube.domain
+  dependencies:
+    schemaRegistry:
+      url: http://schemaregistry.confluent.svc.cluster.local:8081
+    ksqldb:
+    - name: ksqldb
+      url: http://ksqldb.confluent.svc.cluster.local:8088
+    connect:
+    - name: connect
+      url: http://connect.confluent.svc.cluster.local:8083

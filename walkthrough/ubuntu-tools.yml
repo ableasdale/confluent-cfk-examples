@@ -5,7 +5,7 @@ metadata:
 spec:
   containers:
     - name: ubuntu-container
-      image: alexjbleasdale/ubuntu-tools:0.0.1
+      image: alexjbleasdale/ubuntu-tools:0.0.2
       env:
         - name: CONFLUENT_HOME
           value: /usr
