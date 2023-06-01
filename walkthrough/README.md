@@ -1409,7 +1409,7 @@ kubectl exec ubuntu-pod -it -- bash
 ```
 
 
-### JMXTerm
+### JMXTerm (TODO - not working!)
 
 Connect to the `kafka-0` instance:
 
@@ -1484,11 +1484,15 @@ Okay - can't connect to the JVMs!  Not sure why...?  Is Kafka running?!?
 kubectl logs kafka-0
 ```
 
-What about Jolokia then?
+### Monitoring with Jolokia
+
+What about using Jolokia for JMX metrics? 
 
 ```bash
 kubectl describe services kafka-0
 ```
+
+Note that port 7777 is associated with Jolokia - let's set up port forwarding and take a look:
 
 ```bash
 kubectl port-forward kafka-0 7777:7777
@@ -1549,6 +1553,26 @@ curl -s -XGET http://localhost:7777/jolokia/version | jq
 
 ```bash
 curl -s -XGET http://localhost:7777/jolokia/list | jq
+```
+
+This will give you a (very long) list of MBeans that you can query.
+
+```bash
+curl -s -XGET http://localhost:7777/jolokia/read/java.lang:type=Memory/HeapMemoryUsage/used | jq
+```
+
+```json
+{
+  "request": {
+    "path": "used",
+    "mbean": "java.lang:type=Memory",
+    "attribute": "HeapMemoryUsage",
+    "type": "read"
+  },
+  "value": 496541184,
+  "timestamp": 1685615331,
+  "status": 200
+}
 ```
 
 ## Notes
