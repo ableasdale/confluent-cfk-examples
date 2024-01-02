@@ -292,6 +292,24 @@ In order to be able to access the container, we need to configure port forwardin
 kubectl port-forward controlcenter-0 9021:9021
 ```
 
+#### Port Forwarding with a Cloud instance
+
+For cloud instances running CfK, you can also use the private IP address of the instance when configuring Port Forwarding.
+
+To do this you need to establish port forwarding with that instance's **private IP** provided using the `--address` switch when you set up port-forwarding; this will allow you to connect to the instance using the instances **public IP** address from within a browser on a remote machine (e.g. your laptop); to do this you can run:
+
+```bash
+kubectl port-forward --address <PRIVATE_IP_HERE> controlcenter-0 9021:9021
+```
+
+If you've already set up port-forwarding and the prior command is running, run this to get the PID:
+
+```bash
+ps -ef | grep port-forward
+```
+
+And from there you can run `kill -9 <PID>` in order to remove the previously running process.  Note that you will also need to ensure that your Security Group allows ingress TCP connections to be established using port 9021 for your instance.
+
 Check the setup by going to http://localhost:9021/clusters
 
 #### Re-deploy C3
